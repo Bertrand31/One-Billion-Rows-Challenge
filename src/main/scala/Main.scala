@@ -12,17 +12,10 @@ import cats.effect.std.Mutex
 import scala.collection.mutable.HashMap
 import scala.collection.immutable.ArraySeq
 
-final case class Datum(city: String, aggregate: Aggregate)
+final case class Datum(city: String, reading: Double)
 
-object Datum:
-  def fromString(str: String): Datum =
-    str.split(";").toList match {
-      case city :: readingStr :: Nil => Datum(city, Aggregate.fromReading(readingStr.toDouble))
-      case _ => throw new Exception("kek")
-    }
-
-final case class Aggregate(count: Int, sum: Double, min: Double, max: Double):
-  def addReading(reading: Double): Aggregate =
+final case class Aggregate(count: Int, sum: Double, min: Float, max: Float):
+  def addReading(reading: Float): Aggregate =
     Aggregate(
       count = this.count + 1,
       sum = this.sum + reading,
@@ -31,56 +24,31 @@ final case class Aggregate(count: Int, sum: Double, min: Double, max: Double):
     )
 
 object Aggregate:
-  def fromReading(reading: Double): Aggregate =
+  def fromReading(reading: Float): Aggregate =
     Aggregate(1, reading, reading, reading)
-
-given aggregateMonoid: Monoid[Aggregate] = new Monoid[Aggregate] {
-  def empty: Aggregate = Aggregate(1, 0, 0, 0)
-
-  def combine(x: Aggregate, y: Aggregate): Aggregate =
-    Aggregate(
-      count = x.count + y.count,
-      sum = x.sum + y.sum,
-      min = math.min(x.min, y.min),
-      max = math.max(x.min, y.min),
-    )
-}
 
 object App extends IOApp.Simple:
 
   private val state: HashMap[String, Aggregate] = HashMap.empty
 
-  def spawnConsumers(queues: ArraySeq[Queue[IO, Datum]]): IO[ArraySeq[FiberIO[Nothing]]] =
-    queues.zipWithIndex.traverse({
-      case (queue, index) =>
-        (queue.tryTake.flatMap({
-          case None => IO.cede
-          case Some(item) =>
-            val old = state.get(item.city).getOrElse(Monoid[Aggregate].empty)
-            state.update(item.city, old |+| item.aggregate)
-            IO.unit
-        })).foreverM.start
-    })
-
-  val bucketsNb = Runtime.getRuntime().availableProcessors() - 1
-  val queuesIO: IO[ArraySeq[Queue[IO, Datum]]] = 
-      ArraySeq.fill(bucketsNb)(Queue.bounded[IO, Datum](10000)).sequence
-
   def run: IO[Unit] =
     for {
-      queues <- queuesIO
-      consumersHandles <- spawnConsumers(queues)
       _ <- Files[IO]
-        .readUtf8Lines(Path("measurements-short.txt"))
-        .filter(_.nonEmpty)
-        .map(Datum.fromString)
-        .zipWithIndex
-        .foreach({
-          case (datum, index) =>
-            val bucket = math.abs(datum.city.hashCode()) % bucketsNb
-            val queue = queues(bucket)
-            queue.offer(datum)
-        })
+        .readUtf8Lines(Path("measurements.txt"))
+        .chunkN(100_000, true)
+        .foreach(chunk =>
+          chunk.foreach(
+            _.split(";") match {
+              case Array(city, readingStr) =>
+                state.get(city) match {
+                  case None => state.update(city, Aggregate.fromReading(readingStr.toFloat))
+                  case Some(item) => state.update(city, item.addReading(readingStr.toFloat))
+                }
+              case _ =>
+            }
+          )
+          IO.unit
+        )
         .compile.drain
       _ <- IO.println(state)
     } yield ()
