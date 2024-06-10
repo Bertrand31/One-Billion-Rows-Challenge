@@ -13,4 +13,9 @@ lazy val root = project
     libraryDependencies += "co.fs2" %% "fs2-core" % "3.9.4",
     libraryDependencies += "co.fs2" %% "fs2-io" % "3.9.4",
     libraryDependencies += "org.scalameta" %% "munit" % "0.7.29" % Test,
+
+    fork := true,
+    javaOptions ++= Seq(
+      "-Xverify:none"
+    )
   )

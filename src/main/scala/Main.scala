@@ -1,54 +1,33 @@
-import cats.implicits.*
-import cats.effect.*
-import fs2.{Stream, text}
-import fs2.io.file.{Files, Path}
-import cats.effect.kernel.Ref
-import cats.kernel.Monoid
-import cats.kernel.Semigroup
+import java.io.{BufferedReader, File, FileReader}
 import scala.concurrent.ExecutionContext
-import java.util.concurrent.Executors
-import cats.effect.std.Queue
-import cats.effect.std.Mutex
-import scala.collection.mutable.HashMap
-import scala.collection.immutable.ArraySeq
+import scala.collection.mutable.LongMap
+import scala.util.hashing.MurmurHash3 
 
-final case class Datum(city: String, reading: Double)
-
-final case class Aggregate(count: Int, sum: Double, min: Float, max: Float):
-  def addReading(reading: Float): Aggregate =
-    Aggregate(
-      count = this.count + 1,
-      sum = this.sum + reading,
-      min = math.min(this.min, reading),
-      max = math.max(this.max, reading),
-    )
+final case class Aggregate(var count: Int, var sum: Double, var min: Float, var max: Float):
+  def addReading(reading: Float): Unit =
+    this.count += 1
+    this.sum += reading
+    this.min = math.min(reading, this.min)
+    this.max = math.max(reading, this.max)
 
 object Aggregate:
   def fromReading(reading: Float): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-object App extends IOApp.Simple:
+val state: LongMap[Aggregate] = new LongMap(413)
 
-  private val state: HashMap[String, Aggregate] = HashMap.empty
+inline def process(line: String): Unit =
+  val separatorIdx = line.indexOf(";")
+  val cityHash = line.slice(0, separatorIdx).hashCode()
+  val reading = line.slice(separatorIdx + 1, line.size).toFloat
+  state.getOrNull(cityHash) match {
+    case null => state.update(cityHash, Aggregate.fromReading(reading))
+    case item => item.addReading(reading)
+  }
 
-  def run: IO[Unit] =
-    for {
-      _ <- Files[IO]
-        .readUtf8Lines(Path("measurements.txt"))
-        .chunkN(100_000, true)
-        .foreach(chunk =>
-          chunk.foreach(
-            _.split(";") match {
-              case Array(city, readingStr) =>
-                state.get(city) match {
-                  case None => state.update(city, Aggregate.fromReading(readingStr.toFloat))
-                  case Some(item) => state.update(city, item.addReading(readingStr.toFloat))
-                }
-              case _ =>
-            }
-          )
-          IO.unit
-        )
-        .compile.drain
-      _ <- IO.println(state)
-    } yield ()
+@main def run: Unit =
+  val file = new File("measurements.txt")
+  val fileReader = new FileReader(file)
+  val br = new BufferedReader(fileReader)
+  Iterator.continually(br.readLine()).takeWhile(_ != null).foreach(process)
+  println(state.size)
