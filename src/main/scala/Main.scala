@@ -1,3 +1,5 @@
+package onebrc
+
 import java.io.{BufferedReader, File, FileReader}
 import scala.concurrent.ExecutionContext
 import scala.collection.mutable.LongMap
