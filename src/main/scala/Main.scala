@@ -11,14 +11,14 @@ final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max:
     this.min = math.min(reading, this.min)
     this.max = math.max(reading, this.max)
 
-  def show: String =
+  override def toString(): String =
     s"Avg ${this.sum / this.count / 10f} Max ${this.max / 10f} Min ${this.min / 10f}"
 
 object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val state: LongMap[Aggregate] = new LongMap(10000)
+final val state: LongMap[Aggregate] = new LongMap(700)
 
 final val NeededChars = 9
 
@@ -64,6 +64,6 @@ inline def process(line: String): Unit =
   val fileReader = new FileReader(file)
   val br = new BufferedReader(fileReader)
   Iterator.continually(br.readLine()).takeWhile(_ != null).foreach(process)
-  println(s"Paris: ${state(hash("Paris", 5)).show}")
+  println(s"Paris: ${state(hash("Paris", 5))}")
   // assert(state.values.map(_.count).sum == 1_000_000_000)
   // assert(state.size == 413)
