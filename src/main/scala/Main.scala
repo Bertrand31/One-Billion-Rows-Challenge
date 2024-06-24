@@ -2,19 +2,26 @@ package onebrc
 
 import java.io.{BufferedReader, File, FileReader}
 import scala.concurrent.ExecutionContext
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable.LongMap
 import java.io.FileInputStream
 import java.nio.channels.FileChannel
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.nio.MappedByteBuffer
+import scala.concurrent.Future
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+import java.util.concurrent.ConcurrentHashMap
 
 final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
-  def addReading(reading: Int): Unit =
-    this.count += 1
-    this.sum += reading
-    this.min = math.min(reading, this.min)
-    this.max = math.max(reading, this.max)
+  def addReading(reading: Int): Aggregate =
+    this.copy(
+      count = count + 1,
+      sum = sum + reading,
+      min = if reading < this.min then reading else this.min,
+      max = if reading > this.max then reading else this.max,
+    )
 
   override def toString(): String =
     s"Avg ${this.sum / this.count / 10f} Max ${this.max / 10f} Min ${this.min / 10f}"
@@ -23,7 +30,7 @@ object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val state: LongMap[Aggregate] = new LongMap(700)
+final val state: ConcurrentHashMap[Long, Aggregate] = new ConcurrentHashMap(700, 0.75, 20)
 
 inline def parseLoop(buffer: MappedByteBuffer): Unit =
   var lastByte: Byte = buffer.get()
@@ -53,9 +60,11 @@ inline def parseLoop(buffer: MappedByteBuffer): Unit =
   if (isNegative) {
     temperature = -temperature
   }
-  state.getOrNull(cityHash) match
-    case null => state.update(cityHash, Aggregate.fromReading(temperature))
-    case item => item.addReading(temperature)
+  state.compute(cityHash, (_, v) =>
+    v match
+      case null => Aggregate.fromReading(temperature)
+      case item => item.addReading(temperature)
+  )
 
 final val cpuCores = Runtime.getRuntime().availableProcessors()
 
@@ -64,33 +73,38 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
   val channel = FileChannel.open(path, StandardOpenOption.READ)
   val fileSize = channel.size()
   val chunkSize = fileSize / cpuCores
-  (1 until cpuCores).foldLeft(List((0l, chunkSize)))((acc, n) =>
+  val tasks = (1 until cpuCores).foldLeft(List((0l, chunkSize)))((acc, n) =>
     val end =
       if n == cpuCores - 1 then fileSize
       else acc.head._2 + chunkSize
     (acc.head._2, end) :: acc
-  ).foreach({
+  ).map({
     case (beginning, end) =>
-      val size = end - beginning
-      val sizeWithSafeBuffer = if end == fileSize then size else size + 31
-      val buffer = channel.map(
-        FileChannel.MapMode.READ_ONLY,
-        if beginning == 0 then beginning else beginning - 1,
-        sizeWithSafeBuffer + 1,
-      )
-      var bufferPosition = 0
-      // Skipping overflow from the previous chunk's last entry
-      if beginning != 0 then
-        var lastChar: Byte = buffer.get()
-        // 10 is '\n'
-        while lastChar != 10 do
-          lastChar = buffer.get()
+      Future {
+        val size = end - beginning
+        val sizeWithSafeBuffer = if end == fileSize then size else size + 31
+        val buffer = channel.map(
+          FileChannel.MapMode.READ_ONLY,
+          if beginning == 0 then beginning else beginning - 1,
+          sizeWithSafeBuffer + 1,
+        )
+        var bufferPosition = 0
+        // Skipping overflow from the previous chunk's last entry
+        if beginning != 0 then
+          var lastChar: Byte = buffer.get()
+          // 10 is '\n'
+          while lastChar != 10 do
+            lastChar = buffer.get()
 
-      while bufferPosition < size do
-        parseLoop(buffer)
-        bufferPosition = buffer.position()
+        while bufferPosition < size do
+          parseLoop(buffer)
+          bufferPosition = buffer.position()
+      }
   })
+  Await.result(Future.sequence(tasks), Duration.Inf)
+
+  // import scala.jdk.CollectionConverters.*
   // println(s"Paris: ${state(hash("Paris", 5))}")
-  // println(state.values.map(_.count).sum)
-  // assert(state.values.map(_.count).sum == 1_000_000_000)
+  // println(state.mappingCount())
+  // assert(state.elements().asScala.map(_.count).sum == 1_000_000_000)
   // assert(state.size == 413)
