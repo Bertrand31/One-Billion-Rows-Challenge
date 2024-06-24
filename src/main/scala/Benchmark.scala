@@ -22,13 +22,6 @@ object States {
 class Benchmarks {
 
   @Benchmark
-  def customHashing(state: States.MyState, blackhole: Blackhole): Unit =
-    val hash1 = onebrc.hash(state.line1, 20)
-    blackhole.consume(hash1)
-    val hash2 = onebrc.hash(state.line2, 5)
-    blackhole.consume(hash2)
-
-  @Benchmark
   def nativeHashing(state: States.MyState, blackhole: Blackhole): Unit =
     val hash1 = state.line1.slice(0, 20).hashCode()
     blackhole.consume(hash1)
@@ -36,23 +29,9 @@ class Benchmarks {
     blackhole.consume(hash2)
 
   @Benchmark
-  def customFloatParsing(state: States.MyState, blackhole: Blackhole): Unit =
-    val temp1 = onebrc.fakeFloatParse(state.line1, 20 + 1)
-    val temp2 = onebrc.fakeFloatParse(state.line2, 5 + 1)
-    blackhole.consume(temp1)
-    blackhole.consume(temp2)
-
-  @Benchmark
   def nativeFloatParsing(state: States.MyState, blackhole: Blackhole): Unit =
     val temp1 = state.line1.slice(21, state.line1.size).toFloat
     val temp2 = state.line2.slice(6, state.line2.size).toFloat
     blackhole.consume(temp1)
     blackhole.consume(temp2)
-
-  @Benchmark
-  def processLine(state: States.MyState, blackhole: Blackhole): Unit =
-    val unit1 = onebrc.process(state.line1)
-    blackhole.consume(unit1)
-    val unit2 = onebrc.process(state.line2)
-    blackhole.consume(unit2)
 }

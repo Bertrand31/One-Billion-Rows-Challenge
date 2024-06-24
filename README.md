@@ -7,6 +7,5 @@ The original challenge is in Java, but my submission uses Scala.
 
 ### Current state
 
-The current solution runs in around 60 seconds on an Intel i7-13700H.
-It is rather simplistic, and a lot remains to be done (reducing allocations, getting rid of `readLine()`, introducing parallelism).
-The only fun things currently are [the hash function](https://github.com/Bertrand31/One-Billion-Rows-Challenge/blob/master/src/main/scala/Main.scala#L23), which is about 660% faster than the native `hashCode()` and the parsing of the floating-point values, which are parsed "manually" as integers (to be converted back to floating-points numbers at the end of the processing).
+The current solution runs in around 30 seconds on an Intel i7-13700H.
+It is still a WIP, and parallelism has yet to be introduced. In its current state, the only thing that remains to be done before introducing parallelism is to find a solution for different threads to interact with the same keys of the LongMap simulatneously.
