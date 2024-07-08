@@ -1,20 +1,16 @@
 package onebrc
 
-import java.io.{BufferedReader, File, FileReader}
-import scala.concurrent.ExecutionContext
+import java.util.concurrent.ConcurrentHashMap
+import java.io.{BufferedReader, File, FileInputStream, FileReader}
+import java.nio.MappedByteBuffer
+import java.nio.file.{Path, StandardOpenOption}
+import java.nio.channels.FileChannel
+import scala.concurrent.{Await, Future, ExecutionContext}
+import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable.LongMap
-import java.io.FileInputStream
-import java.nio.channels.FileChannel
-import java.nio.file.Path
-import java.nio.file.StandardOpenOption
-import java.nio.MappedByteBuffer
-import scala.concurrent.Future
-import scala.concurrent.Await
-import scala.concurrent.duration.Duration
-import java.util.concurrent.ConcurrentHashMap
 
-final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
+final case class Aggregate(count: Int, sum: Long, min: Int, max: Int):
   def addReading(reading: Int): Aggregate =
     this.copy(
       count = count + 1,
@@ -30,41 +26,49 @@ object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val state: ConcurrentHashMap[Long, Aggregate] = new ConcurrentHashMap(700, 0.75, 20)
+final val state = new ConcurrentHashMap[Long, Aggregate](413, 0.6, 20)
 
-inline def parseLoop(buffer: MappedByteBuffer): Unit =
-  var lastByte: Byte = buffer.get()
-  var cityHash: Long = 0l
+inline def parseLine(buffer: MappedByteBuffer): Unit =
+  var lastByte = buffer.get()
+  var cityHash = 0l
   var i = 0
-  // 59 is ';'
-  while (i < 9 && lastByte != 59) do
+  while lastByte != 59 do // 59 is ';'
+    // This assumes we never need more than 9 characters in our hash,
+    // because only 9*7 bits will fit in a Long
+    // println(s"$lastByte, ${lastByte.toChar}, ${lastByte.toChar.toInt}, ${lastByte.toLong.toBinaryString}")
     cityHash |= lastByte.toLong << i * 7
     i += 1
     lastByte = buffer.get()
+
   var isNegative = false
   var temperature = 0
   lastByte = buffer.get()
-  if (lastByte == '-') {
+  if (lastByte == '-') then
     isNegative = true
-  } else {
+  else 
     temperature += lastByte
-  }
-  // 10 is '\n'
-  while (lastByte != 10) do
+  while (lastByte != 10) do // 10 is '\n'
     lastByte = buffer.get()
-    val short = lastByte - 48
-    if (short >= 0 && short < 10) {
-      temperature *= 10
-      temperature += short
-    }
-  if (isNegative) {
+    // 2³a + 2a = 10a
+    temperature = temperature << 3 + temperature << 1 + lastByte - 48
+
+  if isNegative then
     temperature = -temperature
-  }
   state.compute(cityHash, (_, v) =>
     v match
       case null => Aggregate.fromReading(temperature)
       case item => item.addReading(temperature)
   )
+
+inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): Unit =
+  while buffer.position() < bufferSize do
+    parseLine(buffer)
+
+// Skip overflow from the previous chunk's last entry
+inline def cleanChunk(buffer: MappedByteBuffer, beginning: Long): Unit =
+  var lastByte = buffer.get()
+  while lastByte != 10 do // 10 is '\n'
+    lastByte = buffer.get()
 
 final val cpuCores = Runtime.getRuntime().availableProcessors()
 
@@ -81,24 +85,18 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
   ).map({
     case (beginning, end) =>
       Future {
+        val isFirstChunk = beginning == 0
         val size = end - beginning
         val sizeWithSafeBuffer = if end == fileSize then size else size + 31
         val buffer = channel.map(
           FileChannel.MapMode.READ_ONLY,
-          if beginning == 0 then beginning else beginning - 1,
+          if isFirstChunk then 0 else beginning - 1,
           sizeWithSafeBuffer + 1,
         )
-        var bufferPosition = 0
-        // Skipping overflow from the previous chunk's last entry
-        if beginning != 0 then
-          var lastChar: Byte = buffer.get()
-          // 10 is '\n'
-          while lastChar != 10 do
-            lastChar = buffer.get()
-
-        while bufferPosition < size do
-          parseLoop(buffer)
-          bufferPosition = buffer.position()
+        // If beginning == 0, it means this is the first chunk, and we know that is
+        // begins at the beginning of a line
+        if !isFirstChunk then cleanChunk(buffer, beginning)
+        parseLoop(buffer, size)
       }
   })
   Await.result(Future.sequence(tasks), Duration.Inf)

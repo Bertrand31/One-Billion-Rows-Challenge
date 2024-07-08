@@ -14,3 +14,4 @@ lazy val root = project
   )
 
 enablePlugins(JmhPlugin)
+Compile / scalacOptions += "-language:strictEquality"
