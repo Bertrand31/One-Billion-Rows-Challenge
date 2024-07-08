@@ -14,4 +14,10 @@ lazy val root = project
   )
 
 enablePlugins(JmhPlugin)
+
+enablePlugins(JavaAppPackaging)
+enablePlugins(GraalVMNativeImagePlugin)
+graalVMNativeImageCommand := "/home/bertrand/.sdkman/candidates/java/22.0.1-graal/bin/native-image"
+graalVMNativeImageOptions := Seq("--no-fallback", "--gc=G1", "--pgo=/home/bertrand/Code/onebrc/default.iprof", "-march=native", "-R:MaxHeapSize=16g")
+
 Compile / scalacOptions += "-language:strictEquality"
