@@ -10,14 +10,18 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable.LongMap
 
-final case class Aggregate(count: Int, sum: Long, min: Int, max: Int):
-  def addReading(reading: Int): Aggregate =
-    this.copy(
-      count = count + 1,
-      sum = sum + reading,
-      min = if reading < this.min then reading else this.min,
-      max = if reading > this.max then reading else this.max,
-    )
+final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
+  def addReading(reading: Int): Unit =
+    this.count += 1
+    this.sum += reading
+    this.min = if reading < this.min then reading else this.min
+    this.max = if reading > this.max then reading else this.max
+  
+  def merge(other: Aggregate): Unit =
+    this.count += other.count
+    this.sum += other.sum
+    this.min = if other.min < min then other.min else this.min
+    this.max = if other.max > max then other.max else this.max
 
   override def toString(): String =
     s"Avg ${this.sum / this.count / 10f} Max ${this.max / 10f} Min ${this.min / 10f}"
@@ -26,43 +30,43 @@ object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val state = new ConcurrentHashMap[Long, Aggregate](413, 0.6, 20)
-
-inline def parseLine(buffer: MappedByteBuffer): Unit =
+inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
   var cityHash = 0l
   var i = 0
-  while lastByte != 59 do // 59 is ';'
+  while lastByte != ';' do
     // This assumes we never need more than 9 characters in our hash,
     // because only 9*7 bits will fit in a Long
-    // println(s"$lastByte, ${lastByte.toChar}, ${lastByte.toChar.toInt}, ${lastByte.toLong.toBinaryString}")
     cityHash |= lastByte.toLong << i * 7
     i += 1
     lastByte = buffer.get()
 
+  // Temperatures always have exactly one decimal digit. Therefore, we can parse them manually into
+  // integers. 22.3 becomes 223, -4.1 becomes -41. We only need to /10 at the end.
   var isNegative = false
   var temperature = 0
   lastByte = buffer.get()
-  if (lastByte == '-') then
+  if lastByte == '-' then
     isNegative = true
   else 
     temperature += lastByte
-  while (lastByte != 10) do // 10 is '\n'
+  while lastByte != '\n' do
     lastByte = buffer.get()
-    // 2³a + 2a = 10a
-    temperature = temperature << 3 + temperature << 1 + lastByte - 48
+    if lastByte != '.' then
+      temperature = temperature * 10 + lastByte - 48
 
   if isNegative then
     temperature = -temperature
-  state.compute(cityHash, (_, v) =>
-    v match
-      case null => Aggregate.fromReading(temperature)
-      case item => item.addReading(temperature)
-  )
 
-inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): Unit =
+  map.getOrNull(cityHash) match
+    case null => map.put(cityHash, Aggregate.fromReading(temperature))
+    case item => item.addReading(temperature)
+
+inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggregate] =
+  val localMap = LongMap[Aggregate]()
   while buffer.position() < bufferSize do
-    parseLine(buffer)
+    parseLine(buffer, localMap)
+  localMap
 
 // Skip overflow from the previous chunk's last entry
 inline def cleanChunk(buffer: MappedByteBuffer, beginning: Long): Unit =
@@ -99,10 +103,17 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
         parseLoop(buffer, size)
       }
   })
-  Await.result(Future.sequence(tasks), Duration.Inf)
+  val finalResults = LongMap[Aggregate]()
+  val program = Future.sequence(tasks).map(_.foreach(_.foreach(tpl =>
+      finalResults.getOrNull(tpl._1) match
+        case null => finalResults.put(tpl._1, tpl._2)
+        case agg =>  agg.merge(tpl._2)
+    )
+  ))
+  Await.result(program, Duration.Inf)
+  println(finalResults)
 
-  // import scala.jdk.CollectionConverters.*
   // println(s"Paris: ${state(hash("Paris", 5))}")
-  // println(state.mappingCount())
-  // assert(state.elements().asScala.map(_.count).sum == 1_000_000_000)
-  // assert(state.size == 413)
+  // println(finalResults.size)
+  // assert(finalResults.values.map(_.count).sum == 1_000_000_000)
+  // assert(finalResults.size == 413)
