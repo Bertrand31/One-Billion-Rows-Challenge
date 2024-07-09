@@ -10,6 +10,9 @@ object States {
   class MyState {
     val line1 = "Paris' TestTresLong;11.2"
     val line2 = "Paris;48.0"
+    var number = 32
+    var number2 = 45
+    val byte = 'a'.toByte
   }
 }
 
@@ -21,17 +24,31 @@ object States {
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 class Benchmarks {
 
-  @Benchmark
-  def nativeHashing(state: States.MyState, blackhole: Blackhole): Unit =
-    val hash1 = state.line1.slice(0, 20).hashCode()
-    blackhole.consume(hash1)
-    val hash2 = state.line2.slice(0, 5).hashCode()
-    blackhole.consume(hash2)
+  // @Benchmark
+  // def times10(state: States.MyState, blackhole: Blackhole): Unit =
+  //   blackhole.consume(state.number * 10)
+
+  // @Benchmark
+  // def times10magic(state: States.MyState, blackhole: Blackhole): Unit =
+  //   blackhole.consume((state.number << 1) + (state.number << 3))
+
+  // @Benchmark
+  // def compareByteWithInt(state: States.MyState, blackhole: Blackhole): Unit =
+  //   blackhole.consume(state.number == 46)
+
+  // @Benchmark
+  // def compareByteWithChar(state: States.MyState, blackhole: Blackhole): Unit =
+  //   blackhole.consume(state.number == '.')
+
+  // @Benchmark
+  // def compareByteWithByte(state: States.MyState, blackhole: Blackhole): Unit =
+  //   blackhole.consume(state.number == '.'.toByte)
 
   @Benchmark
-  def nativeFloatParsing(state: States.MyState, blackhole: Blackhole): Unit =
-    val temp1 = state.line1.slice(21, state.line1.size).toFloat
-    val temp2 = state.line2.slice(6, state.line2.size).toFloat
-    blackhole.consume(temp1)
-    blackhole.consume(temp2)
+  def ifelsemin(state: States.MyState, blackhole: Blackhole): Unit =
+    blackhole.consume(if state.number < state.number2 then state.number else state.number2)
+
+  @Benchmark
+  def mathmin(state: States.MyState, blackhole: Blackhole): Unit =
+    blackhole.consume(math.min(state.number, state.number2))
 }
