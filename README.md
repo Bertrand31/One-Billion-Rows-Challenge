@@ -7,5 +7,5 @@ The original challenge is in Java, but my submission uses Scala.
 
 ### Current state
 
-The current solution runs in around 10 seconds on an Intel i7-13700H.
-It is still a WIP, and code has to be refectored to be more legible.
+The current solution runs in ~2.13 seconds on an Intel i7-13700H.
+TODO: sort the output

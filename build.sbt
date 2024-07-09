@@ -18,6 +18,15 @@ enablePlugins(JmhPlugin)
 enablePlugins(JavaAppPackaging)
 enablePlugins(GraalVMNativeImagePlugin)
 graalVMNativeImageCommand := "/home/bertrand/.sdkman/candidates/java/22.0.1-graal/bin/native-image"
-graalVMNativeImageOptions := Seq("--no-fallback", "--gc=G1", "--pgo=/home/bertrand/Code/onebrc/default.iprof", "-march=native", "-R:MaxHeapSize=16g")
+graalVMNativeImageOptions := Seq(
+  "--no-fallback",
+  // "--gc=G1",
+  "--gc=epsilon",
+  // "--pgo-instrument",
+  "--pgo=/home/bertrand/Code/onebrc/default.iprof",
+  "-march=native",
+  "-R:MaxHeapSize=16g",
+  // "-R:PercentTimeInIncrementalCollection=25"
+)
 
 Compile / scalacOptions += "-language:strictEquality"
