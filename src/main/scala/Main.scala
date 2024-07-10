@@ -9,8 +9,11 @@ import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable.LongMap
+import scala.collection.mutable.HashMap
+import scala.collection.mutable.ArrayBuffer
+import java.nio.charset.StandardCharsets
 
-final case class Aggregate(cityName: StringBuilder, var count: Int, var sum: Long, var min: Int, var max: Int):
+final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
   def addReading(reading: Int): Unit =
     this.count += 1
     this.sum += reading
@@ -23,23 +26,25 @@ final case class Aggregate(cityName: StringBuilder, var count: Int, var sum: Lon
     this.min = if other.min < min then other.min else this.min
     this.max = if other.max > max then other.max else this.max
 
-  override def toString(): String =
-    s"${cityName.toString}=${this.min / 10f}/${this.sum / this.count / 10f}/${this.max / 10f}"
+  def toString(cityName: String): String =
+    s"$cityName=${this.min / 10f}/${this.sum / this.count / 10f}/${this.max / 10f}"
 
 object Aggregate:
-  def fromReading(cityNameBytes: StringBuilder, reading: Int): Aggregate =
-    Aggregate(cityNameBytes, 1, reading, reading, reading)
+  def fromReading(reading: Int): Aggregate =
+    Aggregate(1, reading, reading, reading)
+
+final val cityNames = new HashMap[Long, String](413, 0.3)
 
 inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
   var cityHash = 0l
   var i = 0
-  val cityName = new StringBuilder
+  val cityName = new Array[Byte](30)
   while lastByte != ';' do
     // This assumes we never need more than 9 characters in our hash,
     // because only 9*7 bits will fit in a Long
     cityHash |= lastByte.toLong << i * 7
-    cityName += lastByte.toChar
+    cityName(i) = lastByte
     i += 1
     lastByte = buffer.get()
 
@@ -61,7 +66,9 @@ inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
     temperature = -temperature
 
   map.getOrNull(cityHash) match
-    case null => map.put(cityHash, Aggregate.fromReading(cityName, temperature))
+    case null =>
+      cityNames.put(cityHash, new String(cityName, StandardCharsets.UTF_8))
+      map.put(cityHash, Aggregate.fromReading(temperature))
     case item => item.addReading(temperature)
 
 inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggregate] =
@@ -113,8 +120,13 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
     )
   ))
   Await.result(program, Duration.Inf)
-  val results = finalResults.values.toArray.sortInPlaceBy(_.cityName.toString)
-  println(s"{${results.mkString(", ")}}")
+  val resultsStr = StringBuilder("{")
+  finalResults.toArray.sortInPlaceBy(tpl => cityNames(tpl._1)).foreach(tpl =>
+    resultsStr ++= tpl._2.toString(cityNames(tpl._1))
+    resultsStr ++= ", "
+  )
+  resultsStr += '}'
+  println(resultsStr.toString)
 
   // println(s"Paris: ${state(hash("Paris", 5))}")
   // println(finalResults.size)

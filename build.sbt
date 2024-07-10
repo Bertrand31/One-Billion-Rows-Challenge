@@ -25,7 +25,7 @@ graalVMNativeImageOptions := Seq(
   // "--pgo-instrument",
   "--pgo=/home/bertrand/Code/onebrc/default.iprof",
   "-march=native",
-  "-R:MaxHeapSize=20g",
+  "-R:MaxHeapSize=25g",
   "-R:PercentTimeInIncrementalCollection=25"
 )
 
