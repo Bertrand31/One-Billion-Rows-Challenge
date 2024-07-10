@@ -7,4 +7,4 @@ The original challenge is in Java, but my submission uses Scala.
 
 ### Current state
 
-The current solution runs in ~3.0 seconds on an Intel i7-13700H.
+The current solution runs in ~2.5 seconds on an Intel i7-13700H.

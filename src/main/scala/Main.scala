@@ -3,15 +3,13 @@ package onebrc
 import java.util.concurrent.ConcurrentHashMap
 import java.io.{BufferedReader, File, FileInputStream, FileReader}
 import java.nio.MappedByteBuffer
+import java.nio.charset.StandardCharsets
 import java.nio.file.{Path, StandardOpenOption}
 import java.nio.channels.FileChannel
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.collection.mutable.LongMap
-import scala.collection.mutable.HashMap
-import scala.collection.mutable.ArrayBuffer
-import java.nio.charset.StandardCharsets
+import scala.collection.mutable.{LongMap, HashMap}
 
 final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
   def addReading(reading: Int): Unit =
@@ -33,13 +31,13 @@ object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val cityNames = new HashMap[Long, String](413, 0.3)
+final val cityNames = new HashMap[Long, Array[Byte]](413, 0.3)
 
 inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
   var cityHash = 0l
   var i = 0
-  val cityName = new Array[Byte](30)
+  val cityName = new Array[Byte](1 << 5)
   while lastByte != ';' do
     // This assumes we never need more than 9 characters in our hash,
     // because only 9*7 bits will fit in a Long
@@ -67,7 +65,7 @@ inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
 
   map.getOrNull(cityHash) match
     case null =>
-      cityNames.put(cityHash, new String(cityName, StandardCharsets.UTF_8))
+      cityNames.put(cityHash, cityName)
       map.put(cityHash, Aggregate.fromReading(temperature))
     case item => item.addReading(temperature)
 
@@ -121,8 +119,10 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
   ))
   Await.result(program, Duration.Inf)
   val resultsStr = StringBuilder("{")
-  finalResults.toArray.sortInPlaceBy(tpl => cityNames(tpl._1)).foreach(tpl =>
-    resultsStr ++= tpl._2.toString(cityNames(tpl._1))
+  finalResults.toArray.map(tpl =>
+    tpl._2.toString(new String(cityNames(tpl._1), StandardCharsets.UTF_8))
+  ).sortInPlace.foreach(s => 
+    resultsStr ++= s
     resultsStr ++= ", "
   )
   resultsStr += '}'
