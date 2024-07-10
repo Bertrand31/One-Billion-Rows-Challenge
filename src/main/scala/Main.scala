@@ -10,7 +10,7 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.collection.mutable.LongMap
 
-final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
+final case class Aggregate(cityName: StringBuilder, var count: Int, var sum: Long, var min: Int, var max: Int):
   def addReading(reading: Int): Unit =
     this.count += 1
     this.sum += reading
@@ -24,42 +24,44 @@ final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max:
     this.max = if other.max > max then other.max else this.max
 
   override def toString(): String =
-    s"Avg ${this.sum / this.count / 10f} Max ${this.max / 10f} Min ${this.min / 10f}"
+    s"${cityName.toString}=${this.min / 10f}/${this.sum / this.count / 10f}/${this.max / 10f}"
 
 object Aggregate:
-  def fromReading(reading: Int): Aggregate =
-    Aggregate(1, reading, reading, reading)
+  def fromReading(cityNameBytes: StringBuilder, reading: Int): Aggregate =
+    Aggregate(cityNameBytes, 1, reading, reading, reading)
 
 inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
   var cityHash = 0l
   var i = 0
+  val cityName = new StringBuilder
   while lastByte != ';' do
     // This assumes we never need more than 9 characters in our hash,
     // because only 9*7 bits will fit in a Long
     cityHash |= lastByte.toLong << i * 7
+    cityName += lastByte.toChar
     i += 1
     lastByte = buffer.get()
 
   // Temperatures always have exactly one decimal digit. Therefore, we can parse them manually into
   // integers. 22.3 becomes 223, -4.1 becomes -41. We only need to /10 at the end.
   var isNegative = false
-  var temperature = 0
   lastByte = buffer.get()
   if lastByte == '-' then
     isNegative = true
-  else 
-    temperature += lastByte
-  while lastByte != '\n' do
     lastByte = buffer.get()
+  var temperature = lastByte - 48
+  lastByte = buffer.get()
+  while lastByte != '\n' do
     if lastByte != '.' then
-      temperature = temperature * 10 + lastByte - 48
+      temperature = (temperature * 10) + (lastByte - 48)
+    lastByte = buffer.get()
 
   if isNegative then
     temperature = -temperature
 
   map.getOrNull(cityHash) match
-    case null => map.put(cityHash, Aggregate.fromReading(temperature))
+    case null => map.put(cityHash, Aggregate.fromReading(cityName, temperature))
     case item => item.addReading(temperature)
 
 inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggregate] =
@@ -111,7 +113,8 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
     )
   ))
   Await.result(program, Duration.Inf)
-  println(finalResults)
+  val results = finalResults.values.toArray.sortInPlaceBy(_.cityName.toString)
+  println(s"{${results.mkString(", ")}}")
 
   // println(s"Paris: ${state(hash("Paris", 5))}")
   // println(finalResults.size)

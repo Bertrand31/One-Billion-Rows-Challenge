@@ -21,12 +21,12 @@ graalVMNativeImageCommand := "/home/bertrand/.sdkman/candidates/java/22.0.1-graa
 graalVMNativeImageOptions := Seq(
   "--no-fallback",
   // "--gc=G1",
-  "--gc=epsilon",
+  // "--gc=epsilon",
   // "--pgo-instrument",
   "--pgo=/home/bertrand/Code/onebrc/default.iprof",
   "-march=native",
-  "-R:MaxHeapSize=16g",
-  // "-R:PercentTimeInIncrementalCollection=25"
+  "-R:MaxHeapSize=20g",
+  "-R:PercentTimeInIncrementalCollection=25"
 )
 
 Compile / scalacOptions += "-language:strictEquality"
