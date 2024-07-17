@@ -9,7 +9,7 @@ import java.nio.channels.FileChannel
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.collection.mutable.{LongMap, HashMap}
+import scala.collection.mutable.LongMap
 
 final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
   def addReading(reading: Int): Unit =
@@ -31,7 +31,7 @@ object Aggregate:
   def fromReading(reading: Int): Aggregate =
     Aggregate(1, reading, reading, reading)
 
-final val cityNames = new HashMap[Long, Array[Byte]](413, 0.3)
+final val cityNames = new LongMap[Array[Byte]](1 << 10)
 
 inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
@@ -70,7 +70,7 @@ inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
     case item => item.addReading(temperature)
 
 inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggregate] =
-  val localMap = LongMap[Aggregate]()
+  val localMap = new LongMap[Aggregate](1 << 10)
   while buffer.position() < bufferSize do
     parseLine(buffer, localMap)
   localMap
@@ -78,7 +78,7 @@ inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggreg
 // Skip overflow from the previous chunk's last entry
 inline def cleanChunk(buffer: MappedByteBuffer, beginning: Long): Unit =
   var lastByte = buffer.get()
-  while lastByte != 10 do // 10 is '\n'
+  while lastByte != '\n' do
     lastByte = buffer.get()
 
 final val cpuCores = Runtime.getRuntime().availableProcessors()
@@ -104,8 +104,7 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
           if isFirstChunk then 0 else beginning - 1,
           sizeWithSafeBuffer + 1,
         )
-        // If beginning == 0, it means this is the first chunk, and we know that is
-        // begins at the beginning of a line
+        // If this is the first chunk, we know that it begins at the beginning of a line
         if !isFirstChunk then cleanChunk(buffer, beginning)
         parseLoop(buffer, size)
       }
@@ -118,15 +117,15 @@ final val cpuCores = Runtime.getRuntime().availableProcessors()
     )
   ))
   Await.result(program, Duration.Inf)
-  val resultsStr = StringBuilder("{")
-  finalResults.toArray.map(tpl =>
+  val resultsStr = new StringBuilder(50)
+  finalResults.map(tpl =>
     tpl._2.toString(new String(cityNames(tpl._1), StandardCharsets.UTF_8))
-  ).sortInPlace.foreach(s => 
-    resultsStr ++= s
-    resultsStr ++= ", "
+  ).toArray.sortInPlace.foreach(s => 
+    resultsStr.append(s)
+    resultsStr.append(", ")
   )
-  resultsStr += '}'
-  println(resultsStr.toString)
+  resultsStr.append('}')
+  println(resultsStr)
 
   // println(s"Paris: ${state(hash("Paris", 5))}")
   // println(finalResults.size)
