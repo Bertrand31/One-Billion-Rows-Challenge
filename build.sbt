@@ -17,7 +17,7 @@ enablePlugins(JmhPlugin)
 
 enablePlugins(JavaAppPackaging)
 enablePlugins(GraalVMNativeImagePlugin)
-graalVMNativeImageCommand := "/home/bertrand/.sdkman/candidates/java/22.0.1-graal/bin/native-image"
+graalVMNativeImageCommand := "/home/bertrand/.asdf/installs/java/oracle-graalvm-22/lib/svm/bin/native-image"
 graalVMNativeImageOptions := Seq(
   "--no-fallback",
   // "--gc=G1",
