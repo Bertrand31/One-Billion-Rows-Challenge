@@ -1,4 +1,4 @@
-val scala3Version = "3.4.2"
+val scala3Version = "3.5.0"
 
 lazy val root = project
   .in(file("."))
@@ -8,7 +8,7 @@ lazy val root = project
 
     scalaVersion := scala3Version,
 
-    libraryDependencies += "org.scalameta" %% "munit" % "1.0.0" % Test,
+    libraryDependencies += "org.scalameta" %% "munit" % "1.0.2" % Test,
 
     fork := true,
   )
@@ -25,9 +25,9 @@ graalVMNativeImageOptions := Seq(
   // "--pgo-instrument",
   "--pgo=/home/bertrand/Code/onebrc/default.iprof",
   "-march=native",
-  "-R:PercentTimeInIncrementalCollection=80",
+  // "-R:PercentTimeInIncrementalCollection=80",
   "-R:MaxHeapSize=25g",
-  // "-R:MaxNewSize=1g",
+  "-R:MaxNewSize=20g",
 )
 
 Compile / scalacOptions += "-language:strictEquality"

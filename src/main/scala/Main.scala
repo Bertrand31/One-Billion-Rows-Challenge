@@ -6,12 +6,12 @@ import java.nio.MappedByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Path, StandardOpenOption}
 import java.nio.channels.FileChannel
+import scala.collection.mutable.LongMap
 import scala.concurrent.{Await, Future, ExecutionContext}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.collection.mutable.LongMap
 
-final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max: Int):
+final case class Aggregate(var count: Int, var sum: Int, var min: Int, var max: Int):
   def addReading(reading: Int): Unit =
     this.count += 1
     this.sum += reading
@@ -24,7 +24,7 @@ final case class Aggregate(var count: Int, var sum: Long, var min: Int, var max:
     this.min = if other.min < min then other.min else this.min
     this.max = if other.max > max then other.max else this.max
 
-  def toString(cityName: String): String =
+  def toStringWithCityName(cityName: String): String =
     s"$cityName=${this.min / 10f}/${this.sum / this.count / 10f}/${this.max / 10f}"
 
 object Aggregate:
@@ -33,7 +33,7 @@ object Aggregate:
 
 final val cityNames = new LongMap[Array[Byte]](1 << 10)
 
-inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
+inline def parseLine(buffer: MappedByteBuffer, localAggregates: LongMap[Aggregate]): Unit =
   var lastByte = buffer.get()
   var cityHash = 0l
   var i = 0
@@ -63,10 +63,10 @@ inline def parseLine(buffer: MappedByteBuffer, map: LongMap[Aggregate]): Unit =
   if isNegative then
     temperature = -temperature
 
-  map.getOrNull(cityHash) match
+  localAggregates.getOrNull(cityHash) match
     case null =>
       cityNames.put(cityHash, cityName)
-      map.put(cityHash, Aggregate.fromReading(temperature))
+      localAggregates.put(cityHash, Aggregate.fromReading(temperature))
     case item => item.addReading(temperature)
 
 inline def parseLoop(buffer: MappedByteBuffer, bufferSize: Long): LongMap[Aggregate] =
@@ -83,51 +83,52 @@ inline def cleanChunk(buffer: MappedByteBuffer, beginning: Long): Unit =
 
 final val cpuCores = Runtime.getRuntime().availableProcessors()
 
-@main def run: Unit =
+inline def processAndSort(): StringBuilder =
   val path = Path.of("measurements.txt");
   val channel = FileChannel.open(path, StandardOpenOption.READ)
   val fileSize = channel.size()
-  val chunkSize = fileSize / cpuCores
-  val tasks = (1 until cpuCores).foldLeft(List((0l, chunkSize)))((acc, n) =>
-    val end =
-      if n == cpuCores - 1 then fileSize
-      else acc.head._2 + chunkSize
-    (acc.head._2, end) :: acc
-  ).map({
-    case (beginning, end) =>
-      Future {
-        val isFirstChunk = beginning == 0
-        val size = end - beginning
-        val sizeWithSafeBuffer = if end == fileSize then size else size + 31
-        val buffer = channel.map(
-          FileChannel.MapMode.READ_ONLY,
-          if isFirstChunk then 0 else beginning - 1,
-          sizeWithSafeBuffer + 1,
-        )
-        // If this is the first chunk, we know that it begins at the beginning of a line
-        if !isFirstChunk then cleanChunk(buffer, beginning)
-        parseLoop(buffer, size)
-      }
-  })
-  val finalResults = LongMap[Aggregate]()
-  val program = Future.sequence(tasks).map(_.foreach(_.foreach(tpl =>
-      finalResults.getOrNull(tpl._1) match
-        case null => finalResults.put(tpl._1, tpl._2)
-        case agg =>  agg.merge(tpl._2)
+  val chunkSize = fileSize / cpuCores + 1
+  val finalResults = new LongMap[Aggregate](1 << 9)
+  val tasks = Future.traverse(0 until cpuCores)(n =>
+    Future {
+      val beginning = chunkSize * n
+      val end = math.min(fileSize, beginning + chunkSize)
+      val size = end - beginning
+      val sizeWithSafeBuffer = if end == fileSize then size else size + 31
+      val buffer = channel.map(
+        FileChannel.MapMode.READ_ONLY,
+        if n != 0 then beginning - 1 else 0,
+        sizeWithSafeBuffer + 1,
+      )
+      // If this is the first chunk, we know that it begins at the beginning of a line
+      if n != 0 then cleanChunk(buffer, beginning)
+      parseLoop(buffer, size)
+    }
+  ).map(_.foreach(_.foreach(tpl =>
+    finalResults.getOrNull(tpl._1) match
+      case null => finalResults.put(tpl._1, tpl._2)
+      case agg  => agg.merge(tpl._2)
+  )))
+  Await.result(tasks, Duration.Inf)
+  val resultsStr = new StringBuilder(1 << 14, "{")
+  finalResults
+    .map(tpl =>
+      tpl._2.toStringWithCityName(
+        new String(cityNames(tpl._1), StandardCharsets.UTF_8)
+      )
     )
-  ))
-  Await.result(program, Duration.Inf)
-  val resultsStr = new StringBuilder(50)
-  finalResults.map(tpl =>
-    tpl._2.toString(new String(cityNames(tpl._1), StandardCharsets.UTF_8))
-  ).toArray.sortInPlace.foreach(s => 
-    resultsStr.append(s)
-    resultsStr.append(", ")
-  )
-  resultsStr.append('}')
-  println(resultsStr)
+    .toArray
+    .sortInPlace
+    .foreach(s => 
+      resultsStr.append(s)
+      resultsStr.append(", ")
+    )
+  resultsStr.replace(resultsStr.size - 2, resultsStr.size, "}")
+  resultsStr
 
-  // println(s"Paris: ${state(hash("Paris", 5))}")
+@main def run: Unit =
+  println(processAndSort())
+
   // println(finalResults.size)
   // assert(finalResults.values.map(_.count).sum == 1_000_000_000)
   // assert(finalResults.size == 413)
