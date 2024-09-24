@@ -1,4 +1,4 @@
-val scala3Version = "3.5.0"
+val scala3Version = "3.5.1"
 
 lazy val root = project
   .in(file("."))
@@ -25,7 +25,7 @@ graalVMNativeImageOptions := Seq(
   // "--pgo-instrument",
   "--pgo=/home/bertrand/Code/onebrc/default.iprof",
   "-march=native",
-  // "-R:PercentTimeInIncrementalCollection=80",
+  "-R:PercentTimeInIncrementalCollection=1",
   "-R:MaxHeapSize=25g",
   "-R:MaxNewSize=20g",
 )

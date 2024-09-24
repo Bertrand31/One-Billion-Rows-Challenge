@@ -1,13 +1,11 @@
 package onebrc
 
-import java.util.concurrent.ConcurrentHashMap
-import java.io.{BufferedReader, File, FileInputStream, FileReader}
 import java.nio.MappedByteBuffer
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Path, StandardOpenOption}
 import java.nio.channels.FileChannel
 import scala.collection.mutable.LongMap
-import scala.concurrent.{Await, Future, ExecutionContext}
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
 
