@@ -8,26 +8,59 @@ import scala.collection.mutable.LongMap
 import scala.concurrent.{Await, Future}
 import scala.concurrent.duration.Duration
 import scala.concurrent.ExecutionContext.Implicits.global
+import sun.misc.Unsafe
 
-final case class Aggregate(var count: Int, var sum: Int, var min: Int, var max: Int):
+final val unsafe: Unsafe =
+  val f = classOf[Unsafe].getDeclaredField("theUnsafe")
+  f.setAccessible(true)
+  f.get(null).asInstanceOf[Unsafe]
+
+final val IntSizeInBytes = 4l
+final val IntsPerAggregate = 4l
+final val countOffset = 0l
+final val sumOffset = 1l
+final val minOffset = 2l
+final val maxOffset = 3l
+
+final class Aggregate:
+
+  // Storing four integers of 4 bytes
+  private val startIndex = unsafe.allocateMemory(IntsPerAggregate * IntSizeInBytes)
+  unsafe.setMemory(startIndex, IntsPerAggregate * IntSizeInBytes, 0.toByte)
+
+  inline def setValue(index: Long, value: Int): Unit =
+    unsafe.putInt(this.index(index), value)
+
+  def getValue(index: Long): Int =
+    unsafe.getInt(this.index(index))
+
+  private def index(offset: Long): Long =
+    startIndex + (offset * IntSizeInBytes)
+
   def addReading(reading: Int): Unit =
-    this.count += 1
-    this.sum += reading
-    this.min = if reading < this.min then reading else this.min
-    this.max = if reading > this.max then reading else this.max
+    val count = getValue(countOffset)
+    val sum = getValue(sumOffset)
+    val min = getValue(minOffset)
+    val max = getValue(maxOffset)
+    setValue(countOffset, count + 1)
+    setValue(sumOffset, sum + reading)
+    setValue(minOffset, if reading < min then reading else min)
+    setValue(maxOffset, if reading > max then reading else max)
   
   def merge(other: Aggregate): Unit =
-    this.count += other.count
-    this.sum += other.sum
-    this.min = if other.min < min then other.min else this.min
-    this.max = if other.max > max then other.max else this.max
+    setValue(countOffset, getValue(countOffset) + other.getValue(countOffset))
+    setValue(sumOffset, getValue(sumOffset) + other.getValue(sumOffset))
+    setValue(minOffset, math.min(getValue(minOffset), other.getValue(minOffset)))
+    setValue(maxOffset, math.max(getValue(maxOffset), other.getValue(maxOffset)))
 
   def toStringWithCityName(cityName: String): String =
-    s"$cityName=${this.min / 10f}/${this.sum / this.count / 10f}/${this.max / 10f}"
+    s"$cityName=${getValue(minOffset) / 10f}/${getValue(sumOffset) / getValue(countOffset) / 10f}/${getValue(maxOffset) / 10f}"
 
 object Aggregate:
-  def fromReading(reading: Int): Aggregate =
-    Aggregate(1, reading, reading, reading)
+  inline def fromReading(reading: Int): Aggregate =
+    val agg = new Aggregate()
+    agg.addReading(reading)
+    agg
 
 final val cityNames = new LongMap[Array[Byte]](1 << 10)
 
