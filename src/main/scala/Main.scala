@@ -17,10 +17,10 @@ final val unsafe: Unsafe =
 
 final val IntSizeInBytes = 4l
 final val IntsPerAggregate = 4l
-final val countOffset = 0l
-final val sumOffset = 1l
-final val minOffset = 2l
-final val maxOffset = 3l
+final val CountOffset = 0l
+final val SumOffset = 1l
+final val MinOffset = 2l
+final val MaxOffset = 3l
 
 final class Aggregate:
 
@@ -38,23 +38,23 @@ final class Aggregate:
     startIndex + (offset * IntSizeInBytes)
 
   def addReading(reading: Int): Unit =
-    val count = getValue(countOffset)
-    val sum = getValue(sumOffset)
-    val min = getValue(minOffset)
-    val max = getValue(maxOffset)
-    setValue(countOffset, count + 1)
-    setValue(sumOffset, sum + reading)
-    setValue(minOffset, if reading < min then reading else min)
-    setValue(maxOffset, if reading > max then reading else max)
+    val count = getValue(CountOffset)
+    val sum = getValue(SumOffset)
+    val min = getValue(MinOffset)
+    val max = getValue(MaxOffset)
+    setValue(CountOffset, count + 1)
+    setValue(SumOffset, sum + reading)
+    setValue(MinOffset, if reading < min then reading else min)
+    setValue(MaxOffset, if reading > max then reading else max)
   
   def merge(other: Aggregate): Unit =
-    setValue(countOffset, getValue(countOffset) + other.getValue(countOffset))
-    setValue(sumOffset, getValue(sumOffset) + other.getValue(sumOffset))
-    setValue(minOffset, math.min(getValue(minOffset), other.getValue(minOffset)))
-    setValue(maxOffset, math.max(getValue(maxOffset), other.getValue(maxOffset)))
+    setValue(CountOffset, getValue(CountOffset) + other.getValue(CountOffset))
+    setValue(SumOffset, getValue(SumOffset) + other.getValue(SumOffset))
+    setValue(MinOffset, math.min(getValue(MinOffset), other.getValue(MinOffset)))
+    setValue(MaxOffset, math.max(getValue(MaxOffset), other.getValue(MaxOffset)))
 
   def toStringWithCityName(cityName: String): String =
-    s"$cityName=${getValue(minOffset) / 10f}/${getValue(sumOffset) / getValue(countOffset) / 10f}/${getValue(maxOffset) / 10f}"
+    s"$cityName=${getValue(MinOffset) / 10f}/${getValue(SumOffset) / getValue(CountOffset) / 10f}/${getValue(MaxOffset) / 10f}"
 
 object Aggregate:
   inline def fromReading(reading: Int): Aggregate =
@@ -118,9 +118,11 @@ inline def processAndSort(): StringBuilder =
   val path = Path.of("measurements.txt");
   val channel = FileChannel.open(path, StandardOpenOption.READ)
   val fileSize = channel.size()
-  val chunkSize = fileSize / cpuCores + 1
+  // To prevent some cores from finishing early
+  val chunksNb = cpuCores * 4
+  val chunkSize = fileSize / chunksNb + 1
   val finalResults = new LongMap[Aggregate](1 << 9)
-  val tasks = Future.traverse(0 until cpuCores)(n =>
+  val tasks = Future.traverse(0 until chunksNb)(n =>
     Future {
       val beginning = chunkSize * n
       val end = math.min(fileSize, beginning + chunkSize)
@@ -141,6 +143,7 @@ inline def processAndSort(): StringBuilder =
       case agg  => agg.merge(tpl._2)
   )))
   Await.result(tasks, Duration.Inf)
+
   val resultsStr = new StringBuilder(1 << 14, "{")
   finalResults
     .map(tpl =>
@@ -160,6 +163,5 @@ inline def processAndSort(): StringBuilder =
 @main def run: Unit =
   println(processAndSort())
 
-  // println(finalResults.size)
-  // assert(finalResults.values.map(_.count).sum == 1_000_000_000)
+  // assert(finalResults.values.map(_.getValue(CountOffset)).sum == 1_000_000_000)
   // assert(finalResults.size == 413)
